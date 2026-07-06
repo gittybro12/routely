@@ -1,0 +1,4 @@
+- Project scaffolded as a React + Vite application for Abuja car park routing.
+- The app includes map display, car park selection, and route guidance.
+- No extensions were installed; development is standard web stack.
+- Run `npm install` and `npm run dev` in the project root to start.
