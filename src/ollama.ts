@@ -229,7 +229,7 @@ export async function askRoutelyLocalModel({
       if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
         throw new Error('The local model took too long to respond. Try a shorter question, then try again.');
       }
-      throw new Error('I can’t reach the local AI model. Start Ollama, then try again. Setup steps are in AI_SETUP.md.');
+      throw new Error('I can’t reach the local AI model. Start Ollama, then try again. Setup steps are in README.md under Optional local AI setup.');
     }
 
     const payload = await response.json().catch(() => ({} as OllamaResponse)) as OllamaResponse;
