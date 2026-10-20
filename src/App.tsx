@@ -1,723 +1,182 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Autocomplete,
-  Button,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  TextField,
-  Tooltip,
-} from '@mui/material';
-import {
-  MapPin,
-  Compass,
-  Sparkles,
-  Moon,
-  Sun,
-  ArrowLeftRight,
-  Map as MapIcon,
-  SendHorizontal,
-  User,
-  Navigation,
-  Car,
-  Route,
-  PanelLeftClose,
-  PanelLeftOpen,
-  LocateFixed,
-} from 'lucide-react';
-import Map from './Map';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Autocomplete, TextField } from '@mui/material';
+import { ArrowDownUp, ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, ClipboardCheck, Download, Flag, Footprints, LocateFixed, Map as MapIcon, MapPin, MessageCircle, Navigation, Route, Share2 } from 'lucide-react';
+import AppHeader from './AppHeader';
 import LandingPage from './LandingPage';
-import { carParks, findRoutePath, searchParks, parseAndRespondAI } from './data';
-import type { RoutePath, CarPark } from './types';
+import CoveragePage from './CoveragePage';
+import ReportDialog from './ReportDialog';
+import Modal from './Modal';
+import { carParks, findRoutePath, getParkById } from './data';
+import { downloadText, isConnectionVerified, journeyStatus, journeyText, journeyUrl, nearestStops, PILOT_JOURNEYS, readJourneySelection, routeMapSegments, shortStopName, transportLabel } from './journey';
 import { useThemeMode } from './ThemeContext';
+import { useViewportSize } from './useViewportSize';
+import './planner.css';
 
-type UserLocation = {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-};
+const Map = lazy(() => import('./Map'));
+const JourneyAssistant = lazy(() => import('./JourneyAssistant'));
 
-type ActiveTab = 'route' | 'nearby';
-type RightPanelView = 'map' | 'ai';
-
-interface ChatMessage {
-  id: string;
-  sender: 'user' | 'bot';
-  text: string;
-  origin?: CarPark;
-  destination?: CarPark;
-  route?: RoutePath | null;
-  timestamp: string;
-}
-
-const PRESET_PARKS = [
-  { id: 'wuse2', label: 'Wuse 2' },
-  { id: 'jabi', label: 'Jabi' },
-  { id: 'garki', label: 'Garki' },
-  { id: 'cbd', label: 'CBD' },
-  { id: 'airport', label: 'Airport' },
-  { id: 'kubwa', label: 'Kubwa' },
-];
-
-// SVG brand logo mark
-function BrandLogo() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="11" cy="8" r="4.5" fill="white" fillOpacity="0.95" />
-      <circle cx="11" cy="8" r="2.2" fill="url(#rg)" />
-      <path d="M11 12.5 L7 20 Q11 17 15 20 Z" fill="white" fillOpacity="0.9" />
-      <defs>
-        <linearGradient id="rg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="100%" stopColor="#0d9488" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
-function PlannerApp({ onGoHome }: { onGoHome: () => void }) {
-  const { mode, toggleMode } = useThemeMode();
-  const [activeTab, setActiveTab] = useState<ActiveTab>('route');
-  const [rightPanelView, setRightPanelView] = useState<RightPanelView>('map');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [originId, setOriginId] = useState<string>(carParks[0].id);
-  const [destinationId, setDestinationId] = useState<string>(carParks[1].id);
-  const [parkFilter, setParkFilter] = useState('');
-  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
-  const [locationStatus, setLocationStatus] = useState<'unknown' | 'searching' | 'granted' | 'denied' | 'unavailable'>('unknown');
-  const [focusedStepIndex, setFocusedStepIndex] = useState<number | null>(null);
-  const [focusedLocation, setFocusedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [swapSpin, setSwapSpin] = useState(false);
-
-  // Dedicated AI Workspace Chat History
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-1',
-      sender: 'bot',
-      text: 'Welcome to Routely AI Assistant! Ask me anything about commuting in Abuja. Try: "How do I get to Airport from Wuse 2?" or "What are the major transport hubs?"',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ]);
-  const [aiInputText, setAiInputText] = useState('');
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll chat to bottom on new message
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
-  const filteredParks = useMemo(() => searchParks(parkFilter), [parkFilter]);
-  const origin = useMemo(() => carParks.find((park) => park.id === originId), [originId]);
-  const destination = useMemo(() => carParks.find((park) => park.id === destinationId), [destinationId]);
-  const route = useMemo<RoutePath | null>(() => findRoutePath(originId, destinationId), [originId, destinationId]);
-
-  // Suggested alternative when no route found
-  const suggestedAlternative = useMemo(() => {
-    if (route) return null;
-    const hubs = ['wuse2', 'jabi', 'garki'];
-    for (const hub of hubs) {
-      if (hub !== originId && hub !== destinationId) {
-        const r1 = findRoutePath(originId, hub);
-        const r2 = findRoutePath(hub, destinationId);
-        if (r1 && r2) return carParks.find(p => p.id === hub);
-      }
-    }
-    return null;
-  }, [originId, destinationId, route]);
-
-  const handleSwap = () => {
-    setSwapSpin(true);
-    setTimeout(() => setSwapSpin(false), 400);
-    const temp = originId;
-    setOriginId(destinationId);
-    setDestinationId(temp);
-  };
-
-  const handleUseLocation = () => {
-    if (!navigator.geolocation) { setLocationStatus('unavailable'); return; }
-    setLocationStatus('searching');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy ?? 0,
-        });
-        setLocationStatus('granted');
-      },
-      (error) => {
-        setLocationStatus(
-          error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable',
-        );
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-    );
-  };
-
-  const nearbyParks = useMemo(() => {
-    if (!userLocation) return [];
-    return [...carParks]
-      .map((park) => ({
-        ...park,
-        distance: Math.hypot(park.longitude - userLocation.longitude, park.latitude - userLocation.latitude),
-      }))
-      .sort((a, b) => a.distance - b.distance);
-  }, [userLocation]);
-
-  const handleStepClick = (index: number) => {
-    setFocusedStepIndex(index);
-    if (!route) return;
-    if (index === 0 && origin) {
-      setFocusedLocation({ latitude: origin.latitude, longitude: origin.longitude });
-    } else if (index === route.steps.length - 1 && destination) {
-      setFocusedLocation({ latitude: destination.latitude, longitude: destination.longitude });
-    } else if (route.transferPoints[index - 1]) {
-      const match = carParks.find((p) => p.name === route.transferPoints[index - 1]);
-      if (match) setFocusedLocation({ latitude: match.latitude, longitude: match.longitude });
-    }
-  };
-
-  const handleSendAiMessage = (promptOverride?: string) => {
-    const textToSend = promptOverride ?? aiInputText;
-    if (!textToSend.trim()) return;
-
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text: textToSend,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    const aiRes = parseAndRespondAI(textToSend, originId, destinationId);
-    const botMsg: ChatMessage = {
-      id: `bot-${Date.now() + 1}`,
-      sender: 'bot',
-      text: aiRes.text,
-      origin: aiRes.origin,
-      destination: aiRes.destination,
-      route: aiRes.route,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setChatMessages((prev) => [...prev, userMsg, botMsg]);
-    if (!promptOverride) setAiInputText('');
-  };
-
-  const handleApplyAiRouteToMap = (msgOrigin?: CarPark, msgDest?: CarPark) => {
-    if (msgOrigin) setOriginId(msgOrigin.id);
-    if (msgDest) setDestinationId(msgDest.id);
-    setRightPanelView('map');
-  };
-
-  return (
-    <div className="app-shell">
-      {/* Sidebar */}
-      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        {/* Header Bar */}
-        <div className="sidebar-header">
-          <Tooltip title="Back to landing page" placement={sidebarCollapsed ? 'right' : 'bottom'}>
-            <button className="sidebar-brand sidebar-home-link" onClick={onGoHome} aria-label="Back to landing page">
-              <div className="brand-icon">
-                <BrandLogo />
-              </div>
-              {!sidebarCollapsed && (
-                <div className="brand-text">
-                  <h1>Routely</h1>
-                  <span className="subtitle">Abuja Transit Planner</span>
-                </div>
-              )}
-            </button>
-          </Tooltip>
-          <div className="header-actions">
-            {!sidebarCollapsed && (
-              <Tooltip title={rightPanelView === 'ai' ? 'Close AI' : 'Open AI Assistant'}>
-                <button
-                  className={`btn-ai-header-logo ${rightPanelView === 'ai' ? 'active' : ''}`}
-                  onClick={() => setRightPanelView((prev) => (prev === 'ai' ? 'map' : 'ai'))}
-                >
-                  <Sparkles size={15} /> AI
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip title={mode === 'light' ? 'Dark Mode' : 'Light Mode'}>
-              <button className="icon-btn" onClick={toggleMode} aria-label="Toggle Theme">
-                {mode === 'light' ? <Moon size={17} /> : <Sun size={17} />}
-              </button>
-            </Tooltip>
-            <Tooltip title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}>
-              <button className="icon-btn" onClick={() => setSidebarCollapsed(p => !p)} aria-label="Toggle Sidebar">
-                {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-
-        {/* Collapsed Rail: icon-only tab buttons */}
-        {sidebarCollapsed ? (
-          <div className="sidebar-rail">
-            <Tooltip title="Route" placement="right">
-              <button className={`rail-btn ${activeTab === 'route' ? 'active' : ''}`} onClick={() => { setActiveTab('route'); setSidebarCollapsed(false); }}>
-                <Route size={20} />
-              </button>
-            </Tooltip>
-            <Tooltip title="Nearby Parks" placement="right">
-              <button className={`rail-btn ${activeTab === 'nearby' ? 'active' : ''}`} onClick={() => { setActiveTab('nearby'); setSidebarCollapsed(false); }}>
-                <Compass size={20} />
-              </button>
-            </Tooltip>
-            <Tooltip title="AI Assistant" placement="right">
-              <button className={`rail-btn ${rightPanelView === 'ai' ? 'active' : ''}`} onClick={() => setRightPanelView(p => p === 'ai' ? 'map' : 'ai')}>
-                <Sparkles size={20} />
-              </button>
-            </Tooltip>
-            <Tooltip title="Toggle GPS" placement="right">
-              <button className={`rail-btn ${locationStatus === 'granted' ? 'gps-active' : ''}`} onClick={handleUseLocation}>
-                <LocateFixed size={20} />
-              </button>
-            </Tooltip>
-          </div>
-        ) : (
-          <>
-            {/* Tabbed Navigation */}
-            <div className="tab-navigation">
-              <button
-                className={`tab-button ${activeTab === 'route' ? 'active' : ''}`}
-                onClick={() => setActiveTab('route')}
-              >
-                <Route size={15} /> Route
-                {activeTab === 'route' && <span className="tab-active-bar" />}
-              </button>
-              <button
-                className={`tab-button ${activeTab === 'nearby' ? 'active' : ''}`}
-                onClick={() => setActiveTab('nearby')}
-              >
-                <Compass size={15} /> Nearby
-                {activeTab === 'nearby' && <span className="tab-active-bar" />}
-              </button>
-              <button
-                className={`tab-button ${rightPanelView === 'ai' ? 'active' : ''}`}
-                onClick={() => setRightPanelView((prev) => (prev === 'ai' ? 'map' : 'ai'))}
-              >
-                <Sparkles size={15} /> AI
-                {rightPanelView === 'ai' && <span className="tab-active-bar" />}
-              </button>
-            </div>
-
-            {/* Sidebar Body */}
-            <div className="sidebar-body">
-              {/* Status Pill */}
-              <div className="location-pill">
-                <div className="location-pill-status">
-                  <span
-                    className={`status-dot ${locationStatus === 'granted' ? 'active' : locationStatus === 'searching' ? 'searching' : ''}`}
-                  />
-                  <span>
-                    {locationStatus === 'granted' ? 'Location Active'
-                      : locationStatus === 'searching' ? 'Locating...'
-                      : locationStatus === 'denied' ? 'Permission Blocked'
-                      : locationStatus === 'unavailable' ? 'Location Unavailable'
-                      : 'Location Off'}
-                  </span>
-                </div>
-                <button className="btn-locate" onClick={handleUseLocation}>
-                  <LocateFixed size={13} />
-                  {locationStatus === 'searching' ? 'Finding...' : userLocation ? 'Refresh' : 'Enable GPS'}
-                </button>
-              </div>
-
-              {/* ── ROUTE TAB ── */}
-              {activeTab === 'route' && (
-                <div className="tab-content-fade">
-                  {/* Stacked Input Card */}
-                  <div className="route-input-card">
-                    <div className="input-stack-container">
-                      <div className="input-visual-vector">
-                        <div className="vector-node origin" />
-                        <div className="vector-line" />
-                        <div className="vector-node destination" />
-                      </div>
-
-                      <div className="input-fields-wrapper">
-                        <FormControl size="small" className="select-field">
-                          <InputLabel id="origin-select-label">Origin (A)</InputLabel>
-                          <Select
-                            labelId="origin-select-label"
-                            label="Origin (A)"
-                            value={originId}
-                            renderValue={(selectedId) => carParks.find((park) => park.id === selectedId)?.zone ?? ''}
-                            onChange={(e) => setOriginId(e.target.value)}
-                          >
-                            {carParks.map((park) => (
-                              <MenuItem key={park.id} value={park.id}>
-                                {park.name} ({park.zone})
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-
-                        <FormControl size="small" className="select-field">
-                          <InputLabel id="dest-select-label">Destination (B)</InputLabel>
-                          <Select
-                            labelId="dest-select-label"
-                            label="Destination (B)"
-                            value={destinationId}
-                            renderValue={(selectedId) => carParks.find((park) => park.id === selectedId)?.zone ?? ''}
-                            onChange={(e) => setDestinationId(e.target.value)}
-                          >
-                            {carParks.map((park) => (
-                              <MenuItem key={park.id} value={park.id}>
-                                {park.name} ({park.zone})
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </div>
-
-                      <Tooltip title="Swap Origin & Destination">
-                        <button
-                          className={`btn-swap ${swapSpin ? 'spinning' : ''}`}
-                          onClick={handleSwap}
-                          aria-label="Swap origin and destination"
-                        >
-                          <ArrowLeftRight size={16} />
-                          <span className="swap-label">Swap</span>
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-
-                  {/* Quick Destination Preset Chips */}
-                  <div className="quick-preset-container">
-                    <span className="preset-label">Quick Destinations</span>
-                    <div className="preset-chips-row">
-                      {PRESET_PARKS.map((preset) => {
-                        const isOrigin = preset.id === originId;
-                        const isActive = preset.id === destinationId;
-                        return (
-                          <button
-                            key={preset.id}
-                            className={`preset-chip ${isActive ? 'active' : ''} ${isOrigin ? 'muted' : ''}`}
-                            disabled={isOrigin}
-                            title={isOrigin ? 'Already set as origin' : undefined}
-                            onClick={() => {
-                              setDestinationId(preset.id);
-                              if (rightPanelView !== 'map') setRightPanelView('map');
-                            }}
-                          >
-                            {preset.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Autocomplete Search */}
-                  <Autocomplete
-                    freeSolo
-                    size="small"
-                    slotProps={{
-                      listbox: {
-                        sx: {
-                          '& .MuiAutocomplete-option': {
-                            minHeight: 32,
-                            padding: '5px 10px',
-                            fontSize: '13px',
-                            lineHeight: 1.35,
-                          },
-                        },
-                      },
-                    }}
-                    options={filteredParks}
-                    getOptionLabel={(option: string | CarPark) => (typeof option === 'string' ? option : option.name)}
-                    inputValue={parkFilter}
-                    onInputChange={(_, value) => setParkFilter(value)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        placeholder="Search parks (e.g. Wuse, Garki, Jabi...)"
-                        variant="outlined"
-                        size="small"
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            minHeight: 40,
-                            height: 40,
-                            padding: '0 8px',
-                            borderRadius: '10px',
-                          },
-                          '& .MuiOutlinedInput-input': {
-                            padding: '8px 4px',
-                            fontSize: '13px',
-                            lineHeight: '20px',
-                          },
-                          '& .MuiAutocomplete-endAdornment': { top: 'calc(50% - 12px)' },
-                          '& .MuiAutocomplete-popupIndicator svg, & .MuiAutocomplete-clearIndicator svg': {
-                            width: 18,
-                            height: 18,
-                          },
-                        }}
-                      />
-                    )}
-                  />
-
-                  {/* Route Summary & Timeline */}
-                  {route ? (
-                    <div className="route-summary-card route-card-enter">
-                      <div className="route-summary-header">
-                        <h3 className="route-title">
-                          {origin?.name.replace(' Car Park', '')} → {destination?.name.replace(' Car Park', '')}
-                        </h3>
-                        <span className="route-badge">
-                          {route.legs.length === 1 ? 'Direct' : `${route.legs.length} Legs`}
-                        </span>
-                      </div>
-
-                      <div className="route-transfer-info">
-                        {route.transferPoints.length > 0 ? (
-                          <span>Transfers at: <strong>{route.transferPoints.join(', ')}</strong></span>
-                        ) : (
-                          <span>Direct route — no transfers required.</span>
-                        )}
-                      </div>
-
-                      <div className="timeline-container" style={{ marginTop: 14 }}>
-                        <span className="preset-label">Step-by-Step Guidance</span>
-                        <div className="timeline-steps-wrapper">
-                          {route.steps.map((step, idx) => (
-                            <div
-                              key={idx}
-                              className={`timeline-step-item ${focusedStepIndex === idx ? 'focused' : ''}`}
-                              onClick={() => {
-                                handleStepClick(idx);
-                                if (rightPanelView !== 'map') setRightPanelView('map');
-                              }}
-                            >
-                              <div className="step-track">
-                                <div className="step-num-badge">{idx + 1}</div>
-                                {idx < route.steps.length - 1 && <div className="step-connector-line" />}
-                              </div>
-                              <div className="step-content">{step}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="empty-state-card">
-                      <div className="empty-state-icon">
-                        <MapPin size={32} strokeWidth={1.5} />
-                      </div>
-                      <p className="empty-state-title">No route found</p>
-                      <p className="empty-state-desc">
-                        No direct path found between these parks.
-                        {suggestedAlternative && (
-                          <> Try routing via <strong>{suggestedAlternative.name.replace(' Car Park', '')}</strong> as a transfer hub.</>
-                        )}
-                      </p>
-                      {suggestedAlternative && (
-                        <div className="empty-state-actions">
-                          <button className="btn-chip-action" onClick={() => setDestinationId(suggestedAlternative.id)}>
-                            Go via {suggestedAlternative.name.replace(' Car Park', '')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── NEARBY TAB ── */}
-              {activeTab === 'nearby' && (
-                <div className="tab-content-fade nearby-list">
-                  <span className="preset-label">Nearest Abuja Car Parks</span>
-                  {userLocation && nearbyParks.length > 0 ? (
-                    nearbyParks.map((park) => (
-                      <div key={park.id} className="nearby-item-card">
-                        <div className="nearby-item-info">
-                          <h4>{park.name}</h4>
-                          <span>Zone: {park.zone}</span>
-                        </div>
-                        <div className="nearby-actions">
-                          <button
-                            className="btn-chip-action"
-                            onClick={() => { setOriginId(park.id); setActiveTab('route'); setRightPanelView('map'); }}
-                          >
-                            From
-                          </button>
-                          <button
-                            className="btn-chip-action"
-                            onClick={() => { setDestinationId(park.id); setActiveTab('route'); setRightPanelView('map'); }}
-                          >
-                            To
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="empty-state-card">
-                      <div className="empty-state-icon">
-                        <LocateFixed size={32} strokeWidth={1.5} />
-                      </div>
-                      <p className="empty-state-title">GPS not active</p>
-                      <p className="empty-state-desc">Enable your location to discover nearby car parks sorted by distance.</p>
-                      <div className="empty-state-actions">
-                        <Button variant="contained" size="small" onClick={handleUseLocation} sx={{ borderRadius: '8px', fontWeight: 700 }}>
-                          Enable Location
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </aside>
-
-      {/* Right Panel */}
-      {rightPanelView === 'map' ? (
-        <main className="map-panel">
-          <Map
-            carParks={carParks}
-            activeRoute={route}
-            origin={origin}
-            destination={destination}
-            userLocation={userLocation}
-            themeMode={mode}
-            focusedLocation={focusedLocation}
-            onSetOrigin={setOriginId}
-            onSetDestination={setDestinationId}
-          />
-        </main>
-      ) : (
-        <main className="ai-workspace-panel">
-          {/* AI Panel Header */}
-          <div className="ai-workspace-header">
-            <div className="ai-header-brand">
-              <div className="ai-avatar-badge"><Sparkles size={20} /></div>
-              <div className="ai-header-title">
-                <h3>Routely AI Assistant</h3>
-                <span>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', display: 'inline-block', marginRight: 4 }} />
-                  Active Transit Intelligence
-                </span>
-              </div>
-            </div>
-            <button className="btn-view-map" onClick={() => setRightPanelView('map')}>
-              <MapIcon size={15} /> Map View
-            </button>
-          </div>
-
-          {/* Chat Messages Thread */}
-          <div className="ai-chat-messages">
-            {chatMessages.map((msg) => (
-              <div key={msg.id} className={`chat-bubble-row ${msg.sender} bubble-pop`}>
-                <div className={`chat-avatar ${msg.sender}`}>
-                  {msg.sender === 'user' ? <User size={15} /> : <Sparkles size={15} />}
-                </div>
-                <div className="chat-bubble">
-                  <div>{msg.text}</div>
-
-                  {/* Embedded Route Card */}
-                  {msg.route && msg.origin && msg.destination && (
-                    <div className="ai-route-card-embedded">
-                      <div className="ai-route-card-header">
-                        <strong>
-                          <MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-                          {msg.origin.name.replace(' Car Park', '')} → {msg.destination.name.replace(' Car Park', '')}
-                        </strong>
-                        <span className="route-badge">
-                          {msg.route.legs.length === 1 ? 'Direct' : `${msg.route.legs.length} Legs`}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        {msg.route.transferPoints.length > 0
-                          ? `Transfers at: ${msg.route.transferPoints.join(', ')}`
-                          : 'Direct route with no transfers.'}
-                      </div>
-                      <button
-                        className="btn-show-on-map"
-                        onClick={() => handleApplyAiRouteToMap(msg.origin, msg.destination)}
-                      >
-                        <MapIcon size={13} />Show Route on Map
-                      </button>
-                    </div>
-                  )}
-
-                  <div className={`chat-timestamp ${msg.sender}`}>
-                    {msg.timestamp}
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* AI Footer */}
-          <div className="ai-workspace-footer">
-            <div className="ai-preset-prompts-row">
-              <button className="ai-preset-prompt-chip" onClick={() => handleSendAiMessage('How do I get to Airport from Wuse 2?')}>
-                <Navigation size={12} /> Wuse 2 → Airport
-              </button>
-              <button className="ai-preset-prompt-chip" onClick={() => handleSendAiMessage('Show route from Jabi to Kubwa')}>
-                <Car size={12} /> Jabi → Kubwa
-              </button>
-              <button className="ai-preset-prompt-chip" onClick={() => handleSendAiMessage('What are the major transport hubs in Abuja?')}>
-                <MapPin size={12} /> Major Hubs
-              </button>
-            </div>
-
-            <div className="ai-input-container">
-              <input
-                type="text"
-                className="ai-text-input"
-                placeholder="Ask e.g. 'How do I go from Wuse 2 to Kubwa?'"
-                value={aiInputText}
-                onChange={(e) => setAiInputText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleSendAiMessage(); }}
-              />
-              <button
-                className="btn-ai-send"
-                onClick={() => handleSendAiMessage()}
-                disabled={!aiInputText.trim()}
-              >
-                <SendHorizontal size={18} />
-              </button>
-            </div>
-          </div>
-        </main>
-      )}
-    </div>
-  );
-}
+type UserLocation = { latitude: number; longitude: number; accuracy: number };
+type LocationStatus = 'off' | 'searching' | 'ready' | 'denied' | 'unavailable';
+type Dialog = 'helper' | 'report' | 'share' | null;
 
 function App() {
-  const [showPlanner, setShowPlanner] = useState(() => window.location.pathname === '/planner');
+  const { mode } = useThemeMode();
+  useViewportSize();
+  const initialSelection = useMemo(() => readJourneySelection(window.location.search), []);
+  const [page, setPage] = useState(window.location.pathname);
+  const [from, setFrom] = useState(initialSelection.from);
+  const [to, setTo] = useState(initialSelection.to);
+  const [planned, setPlanned] = useState(initialSelection.valid);
+  const [invalidLink, setInvalidLink] = useState(initialSelection.invalidLink);
+  const [mobileView, setMobileView] = useState<'steps' | 'map'>('steps');
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>('off');
+  const [focusedLocation, setFocusedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [toast, setToast] = useState('');
+  const [, setReportVersion] = useState(0);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
+  const locationRequest = useRef(0);
+  const appScroll = useRef<HTMLDivElement>(null);
+  const helperReturnFocus = useRef<HTMLElement | null>(null);
+
+  const route = useMemo(() => planned ? findRoutePath(from, to) : null, [from, to, planned]);
+  const status = journeyStatus(route);
+  const segments = useMemo(() => routeMapSegments(route), [route]);
+  const hasSchematic = segments.some((segment) => !segment.recorded);
+  const nearby = useMemo(() => userLocation ? nearestStops(userLocation).slice(0, 3) : [], [userLocation]);
+  const locationOutsideCoverage = Boolean(nearby.length && nearby[0].distanceKm > 30);
+  const origin = getParkById(from);
+  const destination = getParkById(to);
+  const shareUrl = window.location.origin + journeyUrl(from, to);
+  const plannerHref = planned && from && to ? journeyUrl(from, to) : '/planner';
 
   useEffect(() => {
-    const syncPageWithPath = () => setShowPlanner(window.location.pathname === '/planner');
-    window.addEventListener('popstate', syncPageWithPath);
-    return () => window.removeEventListener('popstate', syncPageWithPath);
+    const sync = () => {
+      setPage(window.location.pathname);
+      const selection = readJourneySelection(window.location.search);
+      setFrom(selection.from); setTo(selection.to); setPlanned(selection.valid); setInvalidLink(selection.invalidLink);
+      setDialog(null); setMobileView('steps');
+      appScroll.current?.scrollTo({ top: 0 });
+    };
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
   }, []);
+  useEffect(() => { document.title = page === '/coverage' ? 'Coverage & data status · Routely' : page === '/planner' ? 'Plan an Abuja journey · Routely' : 'Routely · Know your Abuja journey'; }, [page]);
+  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 5000); return () => window.clearTimeout(timer); }, [toast]);
 
-  const openPlanner = () => {
-    if (window.location.pathname !== '/planner') {
-      window.history.pushState({}, '', '/planner');
-    }
-    setShowPlanner(true);
-  };
+  function navigate(path: string) {
+    setDialog(null);
+    if (window.location.pathname + window.location.search === path) return;
+    window.history.pushState({}, '', path);
+    setPage(path.split('?')[0]);
+    requestAnimationFrame(() => appScroll.current?.scrollTo({ top: 0 }));
+  }
+  function changeMobileView(view: 'steps' | 'map') {
+    setMobileView(view);
+    requestAnimationFrame(() => {
+      const availableHeight = window.visualViewport?.height || window.innerHeight;
+      if (view === 'map' && availableHeight < 540) {
+        appScroll.current?.querySelector('.journey-map-canvas')?.scrollIntoView({ block: 'start' });
+      } else if (view === 'steps' && planned && resultHeading.current) {
+        resultHeading.current.focus();
+      } else {
+        appScroll.current?.scrollTo({ top: 0 });
+      }
+    });
+  }
+  function planJourney(start: string, end: string) {
+    if (!getParkById(start) || !getParkById(end) || start === end) return;
+    const url = journeyUrl(start, end);
+    if (window.location.pathname + window.location.search !== url) window.history.pushState({}, '', url);
+    setPage('/planner'); setFrom(start); setTo(end); setPlanned(true); setInvalidLink(false); setMobileView('steps'); setDialog(null); setFocusedLocation(null);
+    requestAnimationFrame(() => appScroll.current?.scrollTo({ top: 0 }));
+    window.setTimeout(() => resultHeading.current?.focus(), 100);
+  }
+  function submit(event: FormEvent) { event.preventDefault(); planJourney(from, to); }
+  function openHelper(returnFocusTo: HTMLElement | null) {
+    helperReturnFocus.current = returnFocusTo;
+    setDialog('helper');
+  }
+  function closeHelper() {
+    const returnFocusTo = helperReturnFocus.current;
+    setDialog(null);
+    requestAnimationFrame(() => { if (returnFocusTo?.isConnected) returnFocusTo.focus({ preventScroll: true }); });
+  }
+  const selectFrom = useCallback((id: string) => { setFrom(id); setPlanned(false); setInvalidLink(false); setFocusedLocation(null); }, []);
+  const selectTo = useCallback((id: string) => { setTo(id); setPlanned(false); setInvalidLink(false); setFocusedLocation(null); }, []);
+  function locate() {
+    if (!navigator.geolocation) { setLocationStatus('unavailable'); return; }
+    setLocationStatus('searching');
+    const request = ++locationRequest.current;
+    navigator.geolocation.getCurrentPosition((position) => {
+      if (locationRequest.current !== request) return;
+      setUserLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+      setLocationStatus('ready');
+    }, (error) => { if (locationRequest.current === request) setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable'); },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  }
+  function focusStop(id: string) {
+    const stop = getParkById(id);
+    if (!stop) return;
+    setFocusedLocation({ latitude: stop.latitude, longitude: stop.longitude }); changeMobileView('map');
+  }
+  async function copyShareLink() {
+    try { await navigator.clipboard.writeText(shareUrl); setToast('Journey link copied.'); }
+    catch { setToast('Copy the link from the field below.'); }
+  }
 
-  const returnToLandingPage = () => {
-    if (window.location.pathname !== '/') {
-      window.history.pushState({}, '', '/');
-    }
-    setShowPlanner(false);
-  };
-
-  return showPlanner
-    ? <PlannerApp onGoHome={returnToLandingPage} />
-    : <LandingPage onOpenPlanner={openPlanner} />;
+  return <div className="planner-page" ref={appScroll}>
+    <a className="journey-skip" href="#main-content">Skip to main content</a>
+    <AppHeader page={page} plannerHref={plannerHref} onNavigate={navigate} onOpenHelper={openHelper} />
+    {page === '/coverage' ? <CoveragePage onPlan={planJourney} onReport={() => setDialog('report')} /> : page !== '/planner' ? <LandingPage onOpenPlanner={() => navigate(plannerHref)} onViewCoverage={() => navigate('/coverage')} /> : <>
+      <div className="journey-mobile-switch" role="group" aria-label="Journey view"><button aria-pressed={mobileView === 'steps'} onClick={() => changeMobileView('steps')} aria-label="Show journey steps"><Route size={17} /> Steps</button><button aria-pressed={mobileView === 'map'} onClick={() => changeMobileView('map')} aria-label="Show journey map"><MapIcon size={17} /> Map</button></div>
+      <main className={'planner-content mobile-' + mobileView} id="main-content">
+        <section className="journey-sidebar" aria-label="Plan and review your journey">
+          <div className="journey-intro"><span className="journey-eyebrow"><span /> ABUJA, ONE JOURNEY AT A TIME</span><h1>Where are you heading?</h1><p>Find where to board, where to change, and where to get off.</p></div>
+          <div className="journey-data-notice"><ClipboardCheck size={19} /><p><strong>Sample network</strong> · Boarding points and connections need checking. <a href="/coverage" onClick={(event) => { event.preventDefault(); navigate('/coverage'); }}>See coverage</a></p></div>
+          {invalidLink && <p className="journey-error" role="alert">This link contains an unsupported or incomplete journey. Choose two stops below.</p>}
+          <form className="journey-form" onSubmit={submit}>
+            <div className="journey-field"><span className="field-stop-dot">A</span><Autocomplete id="journey-from" options={carParks} value={origin || null} getOptionLabel={(park) => park.name} isOptionEqualToValue={(a, b) => a.id === b.id} onChange={(_, park) => selectFrom(park?.id || '')} autoHighlight clearOnEscape renderInput={(params) => <TextField {...params} label="Where are you starting?" placeholder="Search a mapped stop or area" size="small" />} /></div>
+            <div className="journey-between"><button className="journey-locate" type="button" onClick={locate} disabled={locationStatus === 'searching'}><LocateFixed size={15} />{locationStatus === 'searching' ? 'Finding nearby stops…' : 'Find stops near me'}</button><button type="button" className="journey-swap" aria-label="Swap start and destination" onClick={() => { selectFrom(to); selectTo(from); }} disabled={!from && !to}><ArrowDownUp size={17} /></button></div>
+            <div aria-live="polite" className="journey-location-status">
+              {locationStatus === 'denied' && <p>Location permission is blocked. Choose your starting stop manually or enable location in your browser settings.</p>}
+              {locationStatus === 'unavailable' && <p>Your location could not be found. You can still choose your starting stop.</p>}
+              {locationStatus === 'ready' && locationOutsideCoverage && <p>Your location is outside the current mapped area. Choose an Abuja starting stop below.</p>}
+              {locationStatus === 'ready' && !locationOutsideCoverage && <div className="nearby-choices"><strong>Choose a nearby starting stop</strong><span>Straight-line distance · boarding points need checking</span>{userLocation && userLocation.accuracy > 500 && <p>Location accuracy is about ±{Math.round(userLocation.accuracy)} m.</p>}{nearby.map((park) => <button type="button" key={park.id} onClick={() => selectFrom(park.id)}><MapPin size={15} /><span>{shortStopName(park)}</span><small>{park.distanceKm < 1 ? Math.round(park.distanceKm * 1000) + ' m' : park.distanceKm.toFixed(1) + ' km'}</small></button>)}</div>}
+            </div>
+            <div className="journey-field"><span className="field-stop-dot destination">B</span><Autocomplete id="journey-to" options={carParks} value={destination || null} getOptionLabel={(park) => park.name} isOptionEqualToValue={(a, b) => a.id === b.id} onChange={(_, park) => selectTo(park?.id || '')} autoHighlight clearOnEscape renderInput={(params) => <TextField {...params} label="Where are you going?" placeholder="Search a mapped stop or area" size="small" />} /></div>
+            {from && from === to && <p className="journey-error" role="alert">You selected the same stop. Choose a different destination.</p>}
+            <button type="submit" className="journey-primary journey-find" disabled={!from || !to || from === to}>Find a journey<ArrowRight size={18} /></button>
+          </form>
+          {planned && route ? <section className="journey-results" aria-labelledby="journey-result-title">
+            <div className="journey-result-heading"><span className={status.isVerified ? 'journey-status status-verified' : 'journey-status status-sample'}>{status.isVerified ? <CheckCircle2 size={14} /> : <ClipboardCheck size={14} />}{status.isVerified ? 'Field-checked connections' : 'Sample journey · needs checking'}</span><h2 id="journey-result-title" ref={resultHeading} tabIndex={-1}>{shortStopName(origin)}<ArrowRight size={20} />{shortStopName(destination)}</h2><div className="journey-facts"><span><Route size={15} />{route.legs.length} {route.legs.length === 1 ? 'ride' : 'rides'}</span><span>{route.transferPoints.length === 0 ? 'No changes' : route.transferPoints.length + (route.transferPoints.length === 1 ? ' change' : ' changes')}</span></div><p className="journey-muted">Fewest mapped rides. Time and fare information is unavailable.</p></div>
+            <div className="journey-result-actions"><button className="journey-secondary" onClick={() => setDialog('share')}><Share2 size={15} /> Share</button><button className="journey-secondary" onClick={() => { downloadText('routely-' + from + '-to-' + to + '.txt', journeyText(from, to)); setToast('Journey steps downloaded, including data status.'); }}><Download size={15} /> Download steps</button></div>
+            <ol className="journey-steps">{route.legs.map((leg, index) => <li key={leg.from + leg.to}>
+              <span className="journey-step-number">{index + 1}</span><article className="journey-leg"><span className="journey-leg-kicker">{index === 0 ? 'BOARD' : 'CHANGE VEHICLES'} · {transportLabel(leg)}</span><h3>{index === 0 ? 'Start at ' : 'Change at '}{shortStopName(getParkById(leg.from))}</h3>
+                <dl><div><dt>Board here</dt><dd>{leg.boardingLandmark || 'Exact boarding landmark needs checking.'}</dd></div><div><dt>{isConnectionVerified(leg) ? 'Take' : 'Sample instruction'}</dt><dd>{leg.instruction}</dd></div><div><dt>Get off at</dt><dd>{leg.alightingLandmark || shortStopName(getParkById(leg.to)) + ' — exact alighting point needs checking.'}</dd></div></dl>
+                {leg.serviceNotes && <p className="journey-note">{leg.serviceNotes}</p>}
+                <p className="journey-leg-evidence">{isConnectionVerified(leg) ? 'Checked ' + leg.verification!.checkedAt + ' · ' + leg.verification!.source : 'Sample connection · service and direction unverified'}</p>
+                <div className="journey-leg-map-actions"><button onClick={() => focusStop(leg.from)}><MapPin size={14} /> Boarding stop</button><button onClick={() => focusStop(leg.to)}><MapPin size={14} /> Alighting stop</button></div>
+              </article>
+            </li>)}<li className="journey-arrival"><span className="journey-step-number arrival"><CheckCircle2 size={17} /></span><div><span className="journey-leg-kicker">ARRIVE</span><h3>{shortStopName(destination)}</h3><p>Confirm the destination and boarding point with the driver or operator before travelling.</p></div></li></ol>
+            <button className="journey-report-link" onClick={() => setDialog('report')}><Flag size={15} /> Something looks wrong? Record a correction</button>
+          </section> : planned ? <div className="journey-empty"><Route size={28} /><h2>No mapped connection yet</h2><p>This journey is outside the current sample connections. Try another pair of stops or record what you know.</p><button className="journey-secondary" onClick={() => setDialog('report')}>Record a connection</button></div> : <section className="journey-suggestions"><span className="journey-eyebrow">TRY A SAMPLE JOURNEY</span>{PILOT_JOURNEYS.slice(0, 3).map((journey) => <button key={journey.from + journey.to} onClick={() => planJourney(journey.from, journey.to)}><span><MapPin size={15} />{shortStopName(getParkById(journey.from))}<ArrowRight size={13} />{shortStopName(getParkById(journey.to))}</span><ChevronRight size={16} /></button>)}<p><Footprints size={16} /> Start with a mapped stop. Street addresses and walking directions are not available yet.</p></section>}
+          <div className="journey-sidebar-footer"><span>Built for everyday Abuja journeys.</span><button onClick={(event) => openHelper(event.currentTarget)}>Need help choosing a route?<MessageCircle size={14} /></button></div>
+        </section>
+        <section className="journey-map-area" aria-label="Abuja stops and journey map">
+          <div className="journey-map-heading"><div><span className="journey-eyebrow"><Navigation size={14} /> EXPLORE THE NETWORK</span><strong>{planned ? shortStopName(origin) + ' → ' + shortStopName(destination) : 'Your journey starts with a stop.'}</strong></div><span className="map-city-label">Abuja, Nigeria</span></div>
+          <div className="journey-map-canvas"><button type="button" className="journey-secondary journey-map-back" aria-label="Back to journey steps" onClick={() => changeMobileView('steps')}><ArrowLeft size={18} /> Steps</button><Suspense fallback={<div className="journey-map-loading" role="status">Loading the map… Your journey form is ready.</div>}><Map carParks={carParks} activeRoute={route} origin={origin} destination={destination} userLocation={userLocation} themeMode={mode} focusedLocation={focusedLocation} onSetOrigin={selectFrom} onSetDestination={selectTo} /></Suspense></div>
+          <div className="journey-map-caption"><ClipboardCheck size={17} /><p>{hasSchematic ? 'Dashed lines show sample connections between stop pins, not the streets travelled.' : route ? 'Solid lines show recorded travel paths. Check each connection’s data status.' : 'Pins show sample stop locations. Choose a pin to set your start or destination.'}</p><button onClick={() => navigate('/coverage')}>Data status<ArrowRight size={14} /></button></div>
+        </section>
+      </main>
+    </>}
+    {dialog === 'helper' && <Suspense fallback={<Modal title="Opening journey helper" onClose={closeHelper}><p role="status">Loading the optional helper…</p></Modal>}><JourneyAssistant from={from} to={to} onClose={closeHelper} onPlan={planJourney} /></Suspense>}
+    {dialog === 'report' && <ReportDialog from={from} to={to} onClose={() => setDialog(null)} onSaved={() => setReportVersion((version) => version + 1)} />}
+    {dialog === 'share' && <Modal title="Share this journey" onClose={() => setDialog(null)}><p className="journey-muted">The link opens the same stops and current route data. Sample journeys remain marked as sample.</p><label className="share-label" htmlFor="share-link">Journey link</label><input className="share-link-input" id="share-link" value={shareUrl} readOnly onFocus={(event) => event.target.select()} /><button className="journey-primary" onClick={() => void copyShareLink()}><Share2 size={16} /> Copy journey link</button></Modal>}
+    {toast && <div className="journey-toast" role="status">{toast}</div>}
+  </div>;
 }
 
 export default App;

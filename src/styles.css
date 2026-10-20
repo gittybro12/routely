@@ -1,5 +1,5 @@
 /* ===== Routely Modern HCI Design System ===== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap');
 
 :root,
 [data-theme="light"] {
@@ -96,7 +96,7 @@
 }
 
 html {
-  font-size: 21px;
+  font-size: 100%;
 }
 
 html,
@@ -128,8 +128,8 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ===== Sidebar Panel ===== */
 .sidebar {
-  flex: 0 0 28%;
-  width: 28%;
+  flex: 0 0 clamp(300px, 24vw, 360px);
+  width: clamp(300px, 24vw, 360px);
   min-width: 0;
   max-width: none;
   font-size: 16px;
@@ -140,7 +140,8 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   z-index: 10;
   box-shadow: var(--shadow-lg);
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+  transition: flex-basis 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               background-color 0.3s ease;
@@ -952,20 +953,20 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .map-control-btn {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border-sidebar);
-  color: var(--text-primary);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(250, 249, 245, 0.94);
+  border: 1px solid rgba(67, 89, 77, 0.18);
+  color: #39554d;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.1rem;
   cursor: pointer;
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
-  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(30, 48, 38, 0.12);
+  backdrop-filter: blur(10px);
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
 .map-control-btn svg {
@@ -975,16 +976,21 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .map-control-btn:hover {
-  background: var(--primary);
-  color: #ffffff;
-  transform: scale(1.05);
+  background: #eef3ed;
+  border-color: rgba(23, 111, 100, 0.3);
+  color: #176f64;
+}
+
+.map-control-btn:focus-visible {
+  outline: 2px solid #176f64;
+  outline-offset: 2px;
 }
 
 /* Route-focused markers and clustered park pins */
 .map-stop-marker {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -997,29 +1003,29 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .map-stop-pin {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  border: 3px solid #ffffff;
+  border: 2px solid #fffefa;
   border-radius: 50%;
   color: #ffffff;
-  background: var(--primary);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.34);
-  font-size: 15px;
-  font-weight: 800;
+  background: #176f64;
+  box-shadow: 0 3px 9px rgba(25, 45, 36, 0.24);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .map-stop-marker.destination .map-stop-pin {
-  background: var(--accent-rose);
+  background: #bb7058;
 }
 
 .map-stop-marker.transfer .map-stop-pin {
-  width: 36px;
-  height: 36px;
-  color: #422006;
-  background: var(--accent-amber);
-  font-size: 12px;
+  width: 30px;
+  height: 30px;
+  color: #4b3b22;
+  background: #d3b16e;
+  font-size: 11px;
 }
 
 .map-stop-label {
@@ -1027,14 +1033,14 @@ h1, h2, h3, h4, h5, h6 {
   top: 50%;
   left: calc(100% + 2px);
   transform: translateY(-50%);
-  padding: 7px 10px;
-  border: 1px solid var(--border-card);
-  border-radius: 9px;
-  color: var(--text-primary);
-  background: var(--bg-sidebar);
-  box-shadow: var(--shadow-md);
-  font-size: 12px;
-  font-weight: 700;
+  padding: 6px 9px;
+  border: 1px solid rgba(67, 89, 77, 0.16);
+  border-radius: 8px;
+  color: #34473f;
+  background: rgba(250, 249, 245, 0.96);
+  box-shadow: 0 3px 10px rgba(30, 48, 38, 0.1);
+  font-size: 11px;
+  font-weight: 650;
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1045,25 +1051,25 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .park-cluster-marker {
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
-  border: 3px solid var(--bg-sidebar);
+  border: 2px solid #f8f8f2;
   border-radius: 50%;
-  color: #ffffff;
-  background: var(--accent-indigo);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
+  color: #355c50;
+  background: #dfe9e2;
+  box-shadow: 0 3px 10px rgba(31, 57, 45, 0.16);
   font-family: inherit;
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .park-cluster-marker:hover {
-  transform: scale(1.1);
-  box-shadow: 0 7px 18px rgba(15, 23, 42, 0.35);
+  transform: scale(1.04);
+  box-shadow: 0 5px 12px rgba(31, 57, 45, 0.22);
 }
 
 .park-pin-marker {
@@ -1079,12 +1085,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .park-pin-marker::before {
-  width: 16px;
-  height: 16px;
-  border: 3px solid #ffffff;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #f8f8f2;
   border-radius: 50%;
-  background: var(--accent-indigo);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.34);
+  background: #899e92;
+  box-shadow: 0 2px 6px rgba(31, 57, 45, 0.2);
   content: '';
   transition: transform 0.18s ease;
 }
@@ -1101,27 +1107,28 @@ h1, h2, h3, h4, h5, h6 {
 
 .map-legend {
   position: absolute;
-  bottom: 22px;
-  left: 22px;
+  bottom: 18px;
+  left: 18px;
   z-index: 5;
   display: grid;
   grid-template-columns: repeat(2, max-content);
-  gap: 10px 16px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-sidebar);
-  border-radius: 14px;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-sidebar) 94%, transparent);
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
-  font-size: 12px;
-  font-weight: 600;
+  gap: 7px 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(67, 89, 77, 0.16);
+  border-radius: 12px;
+  color: #586b62;
+  background: rgba(250, 249, 245, 0.94);
+  box-shadow: 0 4px 14px rgba(30, 48, 38, 0.1);
+  backdrop-filter: blur(10px);
+  font-size: 11px;
+  font-weight: 550;
 }
 
 .map-legend > strong {
   grid-column: 1 / -1;
-  color: var(--text-primary);
-  font-size: 13px;
+  color: #34473f;
+  font-size: 11.5px;
+  font-weight: 700;
 }
 
 .map-legend > span {
@@ -1132,25 +1139,24 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .map-key-dot {
-  width: 19px;
-  height: 19px;
+  width: 17px;
+  height: 17px;
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  border: 2px solid var(--bg-sidebar);
+  border: 1px solid #f8f8f2;
   border-radius: 50%;
   color: #ffffff;
-  background: var(--primary);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
-  font-size: 9px;
+  background: #176f64;
+  font-size: 8px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
 }
 
-.map-key-dot.destination { background: var(--accent-rose); }
-.map-key-dot.transfer { color: #422006; background: var(--accent-amber); }
-.map-key-dot.park { width: 12px; height: 12px; background: var(--accent-indigo); }
-.map-key-dot.current { width: 12px; height: 12px; background: #10b981; }
+.map-key-dot.destination { background: #bb7058; }
+.map-key-dot.transfer { color: #4b3b22; background: #d3b16e; }
+.map-key-dot.park { width: 10px; height: 10px; background: #899e92; }
+.map-key-dot.current { width: 10px; height: 10px; background: #4b9a78; }
 
 .routely-park-popup {
   min-width: 220px;

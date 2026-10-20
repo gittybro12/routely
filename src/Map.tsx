@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { LocateFixed, Scan, ZoomIn, ZoomOut } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, LocateFixed, Scan, ZoomIn, ZoomOut } from 'lucide-react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { CarPark, RoutePath } from './types';
+import { routeMapSegments } from './journey';
 
 interface MapProps {
   carParks: CarPark[];
@@ -20,24 +21,29 @@ type ParkChoice = 'origin' | 'destination';
 
 const defaultCenter: [number, number] = [7.4937, 9.0579];
 
-const defaultStyle = {
-  version: 8 as const,
-  sources: {
-    osm: {
-      type: 'raster' as const,
-      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
+const mapStyle = 'https://tiles.openfreemap.org/styles/positron';
+
+function fitCoordinates(map: maplibregl.Map, coordinates: [number, number][], duration = 700) {
+  const container = map.getContainer();
+  if (!coordinates.length || container.clientWidth === 0 || container.clientHeight === 0) return;
+  const bounds = new maplibregl.LngLatBounds();
+  coordinates.forEach((coordinate) => bounds.extend(coordinate));
+  const legend = container.parentElement?.querySelector('.map-legend');
+  const legendHeight = legend?.getBoundingClientRect().height || 0;
+  const legendBottom = legend ? Number.parseFloat(window.getComputedStyle(legend).bottom) || 18 : 0;
+  const verticalSpace = container.clientHeight;
+  const backButtonHeight = container.parentElement?.parentElement?.querySelector('.journey-map-back')?.getBoundingClientRect().height || 0;
+  const topPadding = Math.min(backButtonHeight ? backButtonHeight + 44 : 75, verticalSpace * .3);
+  map.fitBounds(bounds, {
+    padding: {
+      top: topPadding,
+      right: Math.min(100, container.clientWidth * .3),
+      bottom: Math.min(Math.max(legendHeight + legendBottom + 36, 80), Math.max(50, verticalSpace - topPadding - 40)),
+      left: Math.min(60, container.clientWidth * .16),
     },
-  },
-  layers: [
-    {
-      id: 'osm-raster',
-      type: 'raster' as const,
-      source: 'osm',
-    },
-  ],
-};
+    maxZoom: 14, duration,
+  });
+}
 
 function createParkPopup(
   park: CarPark,
@@ -89,27 +95,63 @@ export default function Map({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const locationMarkerRef = useRef<maplibregl.Marker | null>(null);
   const parkMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const [mapAttempt, setMapAttempt] = useState(0);
+  const [mapError, setMapError] = useState('');
+  const [legendOpen, setLegendOpen] = useState(() => !window.matchMedia('(max-width: 960px), (max-height: 540px)').matches);
+  const mapSegments = routeMapSegments(activeRoute);
+  const viewState = useRef({ activeRoute, focusedLocation });
+  useEffect(() => { viewState.current = { activeRoute, focusedLocation }; }, [activeRoute, focusedLocation]);
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 960px), (max-height: 540px)');
+    const syncLegend = () => setLegendOpen(!media.matches);
+    media.addEventListener('change', syncLegend);
+    return () => media.removeEventListener('change', syncLegend);
+  }, []);
+  useEffect(() => {
+    if (!mapRef.current || focusedLocation) return;
+    fitCoordinates(mapRef.current, routeMapSegments(activeRoute).flatMap((segment) => segment.coordinates), 0);
+  }, [legendOpen, activeRoute, focusedLocation]);
 
   useEffect(() => {
     if (!mapContainer.current) return;
 
-    const map = new maplibregl.Map({
+    let map: maplibregl.Map;
+    try { map = new maplibregl.Map({
       container: mapContainer.current,
-      style: defaultStyle,
+      style: mapStyle,
       center: defaultCenter,
       zoom: 11,
       attributionControl: { compact: true },
-    });
+    }); } catch {
+      setMapError('The map could not start in this browser. You can still use the journey steps.');
+      return;
+    }
 
     mapRef.current = map;
+    setMapError('');
+    const onError = () => setMapError('Some map tiles could not load. Journey steps are still available.');
+    map.on('error', onError);
+    const observer = new ResizeObserver(() => {
+      if (!map.getContainer().clientWidth || !map.getContainer().clientHeight) return;
+      map.resize();
+      const view = viewState.current;
+      if (view.focusedLocation) {
+        map.jumpTo({ center: [view.focusedLocation.longitude, view.focusedLocation.latitude], zoom: 14 });
+      } else {
+        fitCoordinates(map, routeMapSegments(view.activeRoute).flatMap((segment) => segment.coordinates), 0);
+      }
+    });
+    observer.observe(mapContainer.current);
 
     return () => {
+      observer.disconnect();
+      map.off('error', onError);
       locationMarkerRef.current?.remove();
       parkMarkersRef.current.forEach((marker) => marker.remove());
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [mapAttempt]);
 
   const renderParkMarkers = useCallback(() => {
     const map = mapRef.current;
@@ -148,6 +190,10 @@ export default function Map({
         .setLngLat([park.longitude, park.latitude])
         .setPopup(popup)
         .addTo(map);
+
+      element.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); marker.togglePopup(); }
+      });
 
       parkMarkersRef.current.push(marker);
     };
@@ -241,69 +287,59 @@ export default function Map({
       map.off('load', updateMarkers);
       map.off('moveend', updateMarkers);
     };
-  }, [renderParkMarkers]);
+  }, [renderParkMarkers, mapAttempt]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const drawRoute = () => {
-      ['route-line-halo', 'route-line-outline', 'route-line'].forEach((layerId) => {
+      ['route-line-recorded', 'route-line-schematic', 'route-line-outline'].forEach((layerId) => {
         if (map.getLayer(layerId)) map.removeLayer(layerId);
       });
       if (map.getSource('route-line')) map.removeSource('route-line');
       if (!activeRoute || !origin || !destination) return;
 
-      const coordinates: [number, number][] = [
-        [origin.longitude, origin.latitude],
-        ...activeRoute.transferPoints.flatMap((name) => {
-          const park = carParks.find((item) => item.name === name);
-          return park ? [[park.longitude, park.latitude] as [number, number]] : [];
-        }),
-        [destination.longitude, destination.latitude],
-      ];
+      const segments = routeMapSegments(activeRoute);
+      const coordinates = segments.flatMap((segment) => segment.coordinates);
+      if (!coordinates.length) return;
 
       map.addSource('route-line', {
         type: 'geojson',
         data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates },
+          type: 'FeatureCollection',
+          features: segments.map((segment) => ({ type: 'Feature', properties: { recorded: segment.recorded },
+            geometry: { type: 'LineString', coordinates: segment.coordinates } })),
         },
       });
 
-      const lineColor = themeMode === 'dark' ? '#38bdf8' : '#0284c7';
-      const lineOutline = themeMode === 'dark' ? '#0b0f19' : '#ffffff';
+      const lineColor = themeMode === 'dark' ? '#4d9a88' : '#176f64';
+      const lineOutline = themeMode === 'dark' ? '#eef3ed' : '#fbfaf6';
 
-      map.addLayer({
-        id: 'route-line-halo',
-        type: 'line',
-        source: 'route-line',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': lineColor, 'line-width': 15, 'line-opacity': 0.22, 'line-blur': 2 },
-      });
       map.addLayer({
         id: 'route-line-outline',
         type: 'line',
         source: 'route-line',
+        filter: ['==', ['get', 'recorded'], true],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': lineOutline, 'line-width': 10, 'line-opacity': 0.96 },
+        paint: { 'line-color': lineOutline, 'line-width': 7, 'line-opacity': 0.92 },
       });
       map.addLayer({
-        id: 'route-line',
+        id: 'route-line-recorded',
         type: 'line',
         source: 'route-line',
+        filter: ['==', ['get', 'recorded'], true],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': lineColor, 'line-width': 5 },
+        paint: { 'line-color': lineColor, 'line-width': 4 },
+      });
+      map.addLayer({
+        id: 'route-line-schematic', type: 'line', source: 'route-line',
+        filter: ['==', ['get', 'recorded'], false],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': lineColor, 'line-width': 3, 'line-opacity': 0.75, 'line-dasharray': [2, 2] },
       });
 
-      const bounds = new maplibregl.LngLatBounds();
-      coordinates.forEach((coordinate) => bounds.extend(coordinate));
-      map.fitBounds(bounds, {
-        padding: { top: 100, right: 100, bottom: 110, left: 100 },
-        maxZoom: 14,
-        duration: 700,
-      });
+      fitCoordinates(map, coordinates);
     };
 
     if (map.isStyleLoaded()) {
@@ -315,7 +351,7 @@ export default function Map({
     return () => {
       map.off('load', drawRoute);
     };
-  }, [activeRoute, carParks, destination, origin, themeMode]);
+  }, [activeRoute, carParks, destination, origin, themeMode, mapAttempt]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -349,7 +385,7 @@ export default function Map({
       marker.remove();
       if (locationMarkerRef.current === marker) locationMarkerRef.current = null;
     };
-  }, [userLocation]);
+  }, [userLocation, mapAttempt]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -360,7 +396,7 @@ export default function Map({
       zoom: 14,
       duration: 1200,
     });
-  }, [focusedLocation]);
+  }, [focusedLocation, mapAttempt]);
 
   const handleZoomIn = () => mapRef.current?.zoomIn();
   const handleZoomOut = () => mapRef.current?.zoomOut();
@@ -369,18 +405,8 @@ export default function Map({
     const map = mapRef.current;
     if (!map || !origin || !destination) return;
 
-    const bounds = new maplibregl.LngLatBounds();
-    bounds.extend([origin.longitude, origin.latitude]);
-    bounds.extend([destination.longitude, destination.latitude]);
-    activeRoute?.transferPoints.forEach((name) => {
-      const park = carParks.find((item) => item.name === name);
-      if (park) bounds.extend([park.longitude, park.latitude]);
-    });
-    map.fitBounds(bounds, {
-      padding: { top: 100, right: 100, bottom: 110, left: 100 },
-      maxZoom: 14,
-      duration: 700,
-    });
+    const coordinates = routeMapSegments(activeRoute).flatMap((segment) => segment.coordinates);
+    fitCoordinates(map, coordinates.length ? coordinates : [[origin.longitude, origin.latitude], [destination.longitude, destination.latitude]]);
   };
 
   const handleRecenterUser = () => {
@@ -394,6 +420,7 @@ export default function Map({
 
   return (
     <div className="map-panel">
+      {mapError && <div className="map-error-notice" role="status"><p>{mapError}</p><button type="button" onClick={() => setMapAttempt((attempt) => attempt + 1)}>Retry map</button></div>}
       <div className="map-controls-overlay" aria-label="Map controls">
         <button className="map-control-btn" onClick={handleZoomIn} title="Zoom in" aria-label="Zoom in">
           <ZoomIn size={22} />
@@ -411,14 +438,20 @@ export default function Map({
         )}
       </div>
 
-      <div className="map-legend" aria-label="Map key">
-        <strong>Map key</strong>
+      <details className="map-legend" aria-label="Map key" open={legendOpen}
+        onToggle={(event) => setLegendOpen(event.currentTarget.open)}>
+        <summary>Map key <ChevronDown size={18} /></summary>
+        <div className="map-legend-items">
+        <strong>Sample stop locations</strong>
         <span><i className="map-key-dot origin">A</i> Origin</span>
         <span><i className="map-key-dot destination">B</i> Destination</span>
         {activeRoute?.transferPoints.length ? <span><i className="map-key-dot transfer">T</i> Transfer</span> : null}
         <span><i className="map-key-dot park" /> Other car parks</span>
         {userLocation && <span><i className="map-key-dot current" /> Your location</span>}
-      </div>
+        {mapSegments.some((segment) => !segment.recorded) && <span><i className="map-path-key" /> Schematic connection</span>}
+        {mapSegments.some((segment) => segment.recorded) && <span><i className="map-path-key recorded" /> Recorded path</span>}
+        </div>
+      </details>
 
       <div className="map-container" ref={mapContainer} />
     </div>

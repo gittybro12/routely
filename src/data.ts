@@ -213,25 +213,29 @@ const rawRouteDefinitions: RouteDefinition[] = [
   { from: 'lokogoma', to: 'lugbe', instruction: 'Take an along taxi from Lokogoma to Lugbe' },
 ];
 
-// Automatically generate bidirectional routes so reverse direction always works cleanly
+// Reverse links are sample assumptions. Evidence and geometry apply only to the checked direction.
 export const routeDefinitions: RouteDefinition[] = (() => {
   const map = new Map<string, RouteDefinition>();
 
-  const addEdge = (from: string, to: string, instruction: string) => {
-    const key = `${from}->${to}`;
+  const addEdge = (definition: RouteDefinition) => {
+    const key = `${definition.from}->${definition.to}`;
     if (!map.has(key)) {
-      map.set(key, { from, to, instruction });
+      map.set(key, { verification: { status: 'sample' }, ...definition });
     }
   };
 
   rawRouteDefinitions.forEach((def) => {
-    addEdge(def.from, def.to, def.instruction);
+    addEdge(def);
+  });
 
+  // Add reverse assumptions after explicit directions so they cannot hide a checked entry.
+  rawRouteDefinitions.forEach((def) => {
     const fromPark = carParks.find((p) => p.id === def.from);
     const toPark = carParks.find((p) => p.id === def.to);
-
-    const reverseInstruction = `Take an along taxi from ${toPark?.name.replace(' Car Park', '') || def.to} to ${fromPark?.name.replace(' Car Park', '') || def.from}`;
-    addEdge(def.to, def.from, reverseInstruction);
+    addEdge({ from: def.to, to: def.from,
+      instruction: `Sample connection from ${toPark?.name || def.to} to ${fromPark?.name || def.from}; service needs checking`,
+      verification: { status: 'sample' },
+    });
   });
 
   return Array.from(map.values());
@@ -242,7 +246,7 @@ export function getParkById(id: string | undefined) {
 }
 
 export function findRoutePath(originId: string | undefined, destinationId: string | undefined): RoutePath | null {
-  if (!originId || !destinationId) return null;
+  if (!originId || !destinationId || !getParkById(originId) || !getParkById(destinationId)) return null;
   if (originId === destinationId) {
     return {
       legs: [],
@@ -266,11 +270,7 @@ export function findRoutePath(originId: string | undefined, destinationId: strin
     for (const edge of neighbors) {
       if (node.visited.has(edge.to)) continue;
 
-      const nextLeg: RouteLeg = {
-        from: edge.from,
-        to: edge.to,
-        instruction: edge.instruction,
-      };
+      const nextLeg: RouteLeg = { ...edge };
       const legs = [...node.legs, nextLeg];
       const visited = new Set(node.visited);
       visited.add(edge.to);
@@ -309,137 +309,269 @@ export interface AIResponse {
   route?: RoutePath | null;
 }
 
+const parkAliases: Record<string, string[]> = {
+  'wuse2': ['wuse 2', 'wuse two', 'banex'],
+  'wuse1': ['wuse 1', 'wuse one', 'wuse market'],
+  'wuse3': ['wuse 3', 'wuse three'],
+  'berger': ['berger', 'berger junction', 'berger roundabout', 'berger hub'],
+  'jabi': ['jabi'],
+  'utako': ['utako'],
+  'kado': ['kado'],
+  'life-camp': ['life camp'],
+  'gwarinpa': ['gwarinpa'],
+  'kubwa': ['kubwa'],
+  'cbd': ['cbd', 'abuja cbd', 'central business district'],
+  'maitama': ['maitama'],
+  'garki': ['garki', 'garki area 2'],
+  'area1': ['area 1', 'area one', 'area one hub'],
+  'apo': ['apo', 'gudu', 'apo gudu'],
+  'lokogoma': ['lokogoma'],
+  'asokoro': ['asokoro', 'aya'],
+  'nyanya': ['nyanya'],
+  'karu': ['karu'],
+  'lugbe': ['lugbe'],
+  'airport': ['airport', 'naia', 'nnamdi azikiwe airport'],
+};
+
+function normalizeAssistantText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\u2018\u2019']/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function findMentionedParks(query: string) {
+  const normalizedQuery = normalizeAssistantText(query);
+  const paddedQuery = ' ' + normalizedQuery + ' ';
+  const mentions: { park: CarPark; index: number; length: number }[] = [];
+
+  carParks.forEach((park) => {
+    const aliases = [
+      park.name,
+      park.zone,
+      park.id,
+      ...(parkAliases[park.id] || []),
+    ]
+      .map(normalizeAssistantText)
+      .filter(Boolean);
+
+    aliases.forEach((alias) => {
+      const phrase = ' ' + alias + ' ';
+      let offset = 0;
+      let index = paddedQuery.indexOf(phrase, offset);
+
+      while (index !== -1) {
+        const followingWords = paddedQuery.slice(index + phrase.length);
+        if (park.id === 'airport' && /^\s*road\b/.test(followingWords)) {
+          offset = index + phrase.length - 1;
+          index = paddedQuery.indexOf(phrase, offset);
+          continue;
+        }
+        mentions.push({ park, index, length: alias.length });
+        offset = index + phrase.length - 1;
+        index = paddedQuery.indexOf(phrase, offset);
+      }
+    });
+  });
+
+  // Prefer the longest matching alias when two names start at the same word.
+  mentions.sort((a, b) => a.index - b.index || b.length - a.length);
+  const uniqueMentions = new Map<string, { park: CarPark; index: number; length: number }>();
+  mentions.forEach((mention) => {
+    const key = mention.park.id + ':' + mention.index;
+    if (!uniqueMentions.has(key)) uniqueMentions.set(key, mention);
+  });
+
+  return Array.from(uniqueMentions.values()).sort((a, b) => a.index - b.index);
+}
+
+function getMentionEndpointRole(query: string, mention: { index: number }) {
+  const prefix = ' ' + query.slice(0, Math.max(0, mention.index - 1)) + ' ';
+  const fromIndex = prefix.lastIndexOf(' from ');
+  const toIndex = prefix.lastIndexOf(' to ');
+
+  if (fromIndex > toIndex) return 'origin';
+  if (toIndex > fromIndex) return 'destination';
+  return undefined;
+}
+function getMappedHubs() {
+  const connectionCounts = new Map<string, number>();
+  routeDefinitions.forEach(({ from }) => {
+    connectionCounts.set(from, (connectionCounts.get(from) || 0) + 1);
+  });
+
+  return Array.from(connectionCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([parkId]) => getParkById(parkId))
+    .filter((park): park is CarPark => Boolean(park));
+}
+
+function getDataLimitNote(query: string) {
+  const normalized = normalizeAssistantText(query);
+  const asksForTime = /\b(time|long|duration|traffic|delay|fastest|quickest|best)\b/.test(normalized);
+  const asksForFare = /\b(fare|price|cost|cheap|expensive)\b/.test(normalized);
+
+  if (asksForTime && asksForFare) {
+    return 'Routely does not have live traffic, journey-time, or fare data yet. ';
+  }
+  if (asksForTime) {
+    return 'Routely does not have live traffic or journey-time data yet. ';
+  }
+  if (asksForFare) {
+    return 'Routely does not have fare data yet. ';
+  }
+  return '';
+}
+
 export function getAssistantResponse(query: string, routePath: RoutePath | null, originId?: string, destinationId?: string) {
-  const normalized = query.trim().toLowerCase();
+  const normalized = normalizeAssistantText(query);
   if (!normalized) return '';
 
   const originPark = getParkById(originId);
   const destinationPark = getParkById(destinationId);
-  const originName = originPark?.name || originId || 'your selected park';
+  const originName = originPark?.name || originId || 'your selected stop';
   const destinationName = destinationPark?.name || destinationId || 'your selected destination';
 
-  if (!routePath || routePath.legs.length === 0) {
-    if (originId && destinationId && originId !== destinationId) {
-      return `There is not yet a mapped route from ${originName} to ${destinationName}. Try a nearby park pair or pick a direct connection from the list.`;
-    }
-    return `Please choose both an origin and a destination so I can suggest a route.`;
+  if (originId && destinationId && originId === destinationId) {
+    return 'You are already at ' + originName + '. Choose a different destination to plan another trip.';
   }
 
-  const firstInstruction = routePath.legs[0]?.instruction || '';
+  if (!routePath || routePath.legs.length === 0) {
+    if (originId && destinationId) {
+      return 'I could not find a mapped route from ' + originName + ' to ' + destinationName + '. Try another pair of stops shown in the Abuja map.';
+    }
+    return 'Choose an origin and destination from the mapped Abuja stops so I can suggest a route.';
+  }
+
   const transferText = routePath.transferPoints.length > 0
-    ? `Transfer at ${routePath.transferPoints.join(', ')}.`
-    : 'No transfer needed.';
+    ? 'Transfer at ' + routePath.transferPoints.join(', ') + '.'
+    : 'No transfer is needed.';
 
-  const numberedSteps = routePath.steps.map((s, i) => `${i + 1}. ${s}`).join(' ');
-  const compactSteps = routePath.steps.join(' → ');
+  const numberedSteps = routePath.steps.map((step, index) => (index + 1) + '. ' + step).join(' ');
 
-  if (normalized.includes('direct') || normalized.includes('nonstop')) {
+  if (/\b(direct|nonstop)\b/.test(normalized)) {
     const direct = routePath.legs.length === 1;
     return direct
-      ? `Yes — there is a direct along route from ${originName} to ${destinationName}. ${transferText}`
-      : `No single direct ride from ${originName} to ${destinationName}. ${transferText}`;
+      ? 'Yes, there is a direct mapped route from ' + originName + ' to ' + destinationName + '. ' + transferText
+      : 'There is no single direct ride from ' + originName + ' to ' + destinationName + '. ' + transferText;
   }
 
-  if (normalized.includes('next') || normalized.includes('transfer')) {
+  if (/\b(next|transfer)\b/.test(normalized)) {
     const nextPoint = routePath.transferPoints[0] || destinationName;
-    return `Next step: ${firstInstruction}. Then continue toward ${nextPoint} and arrive at ${destinationName}.`;
+    return 'The next step: ' + routePath.legs[0].instruction + '. Then continue toward ' + nextPoint + ' and arrive at ' + destinationName + '.';
   }
 
-  if (normalized.includes('fastest') || normalized.includes('best')) {
-    return `Suggested route (${routePath.legs.length} leg${routePath.legs.length === 1 ? '' : 's'}): ${compactSteps}.`;
+  if (/\b(fastest|quickest|best)\b/.test(normalized)) {
+    return 'The route with the fewest mapped legs has ' + routePath.legs.length + ' leg' + (routePath.legs.length === 1 ? '' : 's') + ': ' + routePath.steps.join(' Then ') + ' ' + transferText;
   }
 
-  if (normalized.includes('how') || normalized.includes('route') || normalized.includes('go') || normalized.includes('steps')) {
-    return `Step-by-step from ${originName} to ${destinationName}: ${numberedSteps} ${transferText} Total legs: ${routePath.legs.length}.`;
+  if (/\b(how|route|go|steps|directions|commute|travel|get|way)\b/.test(normalized)) {
+    return 'Step by step from ' + originName + ' to ' + destinationName + ': ' + numberedSteps + ' ' + transferText;
   }
 
-  return `From ${originName}: ${compactSteps}. ${transferText} Details: ${numberedSteps}`;
+  return 'From ' + originName + ' to ' + destinationName + ': ' + routePath.steps.join(' Then ') + ' ' + transferText;
 }
 
 export function parseAndRespondAI(query: string, currentOriginId?: string, currentDestId?: string): AIResponse {
-  const normalized = query.trim().toLowerCase();
+  const normalized = normalizeAssistantText(query);
   if (!normalized) {
-    return { text: "Hello! I am Routely AI. How can I help you plan your commute in Abuja today?" };
+    return { text: 'Hello! What Abuja trip can I help you plan?' };
   }
 
-  // Find all matched car parks in the user query
-  const matchedParks: { park: CarPark; index: number }[] = [];
-
-  carParks.forEach((park) => {
-    const nameLower = park.name.toLowerCase();
-    const zoneLower = park.zone.toLowerCase();
-    const idLower = park.id.toLowerCase();
-
-    let idx = normalized.indexOf(nameLower);
-    if (idx === -1) idx = normalized.indexOf(zoneLower);
-    if (idx === -1) idx = normalized.indexOf(idLower);
-
-    // Common alias matching for Abuja locations
-    if (idx === -1) {
-      if (idLower === 'wuse1' && (normalized.includes('wuse 1') || normalized.includes('wuse market'))) idx = 0;
-      else if (idLower === 'wuse2' && (normalized.includes('wuse 2') || normalized.includes('banex'))) idx = 0;
-      else if (idLower === 'berger' && (normalized.includes('berger') || normalized.includes('berger junction'))) idx = 0;
-      else if (idLower === 'area1' && (normalized.includes('area 1') || normalized.includes('area1'))) idx = 0;
-      else if (idLower === 'asokoro' && (normalized.includes('asokoro') || normalized.includes('aya'))) idx = 0;
-      else if (idLower === 'airport' && (normalized.includes('airport') || normalized.includes('naia'))) idx = 0;
-      else if (idLower === 'kubwa' && normalized.includes('kubwa')) idx = 0;
-      else if (idLower === 'jabi' && normalized.includes('jabi')) idx = 0;
-      else if (idLower === 'garki' && normalized.includes('garki')) idx = 0;
-      else if (idLower === 'gwarinpa' && normalized.includes('gwarinpa')) idx = 0;
-      else if (idLower === 'life-camp' && normalized.includes('life camp')) idx = 0;
-    }
-
-    if (idx !== -1) {
-      matchedParks.push({ park, index: idx });
-    }
-  });
-
-  // Sort matched parks by their order in the query string
-  matchedParks.sort((a, b) => a.index - b.index);
-
-  let originPark: CarPark | undefined;
-  let destPark: CarPark | undefined;
-
-  if (matchedParks.length >= 2) {
-    originPark = matchedParks[0].park;
-    destPark = matchedParks[1].park;
-  } else if (matchedParks.length === 1) {
-    destPark = matchedParks[0].park;
-    originPark = getParkById(currentOriginId) || carParks[0];
-  } else {
-    originPark = getParkById(currentOriginId);
-    destPark = getParkById(currentDestId);
-  }
-
-  if (originPark && destPark && originPark.id !== destPark.id) {
-    const route = findRoutePath(originPark.id, destPark.id);
-    if (route) {
-      const transferText = route.transferPoints.length > 0
-        ? `You will need to transfer at ${route.transferPoints.join(', ')}.`
-        : `This is a direct along route with no transfers required.`;
-
-      const text = `I found a route from **${originPark.name}** to **${destPark.name}** (${route.legs.length} leg${route.legs.length === 1 ? '' : 's'}). ${transferText}`;
-      return { text, origin: originPark, destination: destPark, route };
-    }
-  }
-
-  // Fallback conversational responses
-  if (normalized.includes('hub') || normalized.includes('park') || normalized.includes('major')) {
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening)$/.test(normalized)) {
     return {
-      text: "The major public transport hubs in Abuja are **Berger Roundabout** (connects Kubwa, Gwarinpa, Wuse, Jabi), **Area 1 Roundabout** (connects Garki, Airport Road, Apo, Nyanya), **Wuse Market**, **Jabi Motor Park**, and **AYA Asokoro**.",
+      text: 'Hello! I can help with routes between mapped Abuja stops, route connections, and the transport hubs in Routely. Where are you heading?',
     };
   }
 
-  if (normalized.includes('along') || normalized.includes('taxi') || normalized.includes('how to')) {
+  const mentions = findMentionedParks(query);
+  const asksForRoute = /\b(route|directions|commute|travel|go|reach|ride|transfer|direct|fastest|quickest|steps)\b/.test(normalized)
+    || /\bhow (?:do|can) i get\b|\bget (?:me )?to\b|\bway to\b|\btake me to\b|\b(?:bus|taxi|shuttle)\b.*\bto\b|\bfrom\b.*\bto\b/.test(normalized)
+    || mentions.length >= 2;
+
+  if (asksForRoute) {
+    let originPark: CarPark | undefined;
+    let destinationPark: CarPark | undefined;
+
+    if (mentions.length >= 2) {
+      const firstRole = getMentionEndpointRole(normalized, mentions[0]);
+      const secondRole = getMentionEndpointRole(normalized, mentions[1]);
+      const reverseOrder = (secondRole === 'origin' && firstRole !== 'origin')
+        || (firstRole === 'destination' && secondRole !== 'destination');
+      const originMention = reverseOrder ? mentions[1] : mentions[0];
+      const destinationMention = reverseOrder ? mentions[0] : mentions[1];
+      originPark = originMention.park;
+      destinationPark = destinationMention.park;
+    } else if (mentions.length === 1) {
+      const mention = mentions[0];
+      if (getMentionEndpointRole(normalized, mention) === 'origin') {
+        originPark = mention.park;
+        destinationPark = getParkById(currentDestId);
+      } else {
+        originPark = getParkById(currentOriginId);
+        destinationPark = mention.park;
+      }
+    } else {
+      originPark = getParkById(currentOriginId);
+      destinationPark = getParkById(currentDestId);
+    }
+
+    if (!originPark || !destinationPark) {
+      return {
+        text: 'Name both the starting stop and destination, for example: “How do I get from Wuse 2 to Airport?”',
+      };
+    }
+
+    if (originPark.id === destinationPark.id) {
+      return {
+        text: 'You are already at ' + originPark.name + '. Choose a different destination to plan another trip.',
+        origin: originPark,
+        destination: destinationPark,
+      };
+    }
+
+    const route = findRoutePath(originPark.id, destinationPark.id);
+    if (!route) {
+      return {
+        text: 'I could not find a mapped route from ' + originPark.name + ' to ' + destinationPark.name + '. Try another pair of stops shown in the Abuja map.',
+        origin: originPark,
+        destination: destinationPark,
+      };
+    }
+
+    const limitation = getDataLimitNote(query);
+    const response = getAssistantResponse(query, route, originPark.id, destinationPark.id);
     return {
-      text: "Abuja 'Along' taxis are shared cabs operating along fixed arterial corridors. Passengers queue or flag cabs at major roundabouts like Berger, Area 1, Wuse Market, or AYA Asokoro. Always confirm your destination with the driver before boarding.",
+      text: limitation + response,
+      origin: originPark,
+      destination: destinationPark,
+      route,
+    };
+  }
+
+  if (/\b(hub|hubs|major|connected)\b/.test(normalized)) {
+    const hubs = getMappedHubs().map((park) => park.name.replace(' Car Park', ''));
+    return {
+      text: 'In Routely’s mapped network, the most connected stops are ' + hubs.join(', ') + '. This reflects the routes currently in the app.',
+    };
+  }
+
+  if (/\b(along|taxi|shuttle|bus|fare|price|cost)\b/.test(normalized)) {
+    return {
+      text: 'Routely’s route map includes shared “along” taxis and a few shuttle connections. Confirm the destination with the driver or operator before boarding. ' + getDataLimitNote(query),
+    };
+  }
+
+  if (mentions.length === 1 && /\b(where|location|zone|located|about|what|which)\b/.test(normalized)) {
+    const park = mentions[0].park;
+    return {
+      text: park.name + ' is listed in the ' + park.zone + ' area in Routely’s Abuja map.',
     };
   }
 
   return {
-    text: getAssistantResponse(query, findRoutePath(originPark?.id, destPark?.id), originPark?.id, destPark?.id),
-    origin: originPark,
-    destination: destPark,
-    route: findRoutePath(originPark?.id, destPark?.id),
+    text: 'I can help with routes between stops in Routely’s Abuja map, mapped transport hubs, and the “along” taxi connections it lists. I do not have live traffic, journey times, or fares. Try asking “How do I get from Wuse 2 to Airport?”',
   };
 }
