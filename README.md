@@ -9,9 +9,11 @@ Routely is a public transport journey planner for Abuja. It is designed to help 
 ## What you can do
 
 - Choose a starting stop and destination to explore a sample journey.
+- Search using local stop aliases, alternate spellings, and small typing mistakes.
 - Read boarding, transfer, and alighting steps alongside a map.
 - Find nearby starting stops when you allow location access.
 - Share a journey link or download its steps as text.
+- Save up to twenty journeys and reopen your five most recent successful searches on this device.
 - Explore the ten pilot journeys and record observations for review.
 - Ask the built-in journey helper for assistance. Local AI is optional.
 
@@ -26,6 +28,8 @@ Routely is a public transport journey planner for Abuja. It is designed to help 
 The stop locations and connections are samples awaiting field checks. Dashed map lines connect stops; they do not show the streets a vehicle follows. The planner finds the fewest mapped rides. Live service, traffic, fares, operating hours, journey times, street-address search, and walking directions are not available.
 
 Reports are saved in your browser and must be downloaded to share with a maintainer. They are not automatically submitted or approved. Map tiles need internet; downloaded text steps can be read offline.
+
+Saved journeys and recent searches also stay in this browser. They store the selected stops and reopen with current route information. They do not provide offline app or map access. If browser storage is unavailable, journeys are only kept for the current visit.
 
 ## What comes next
 

@@ -291,15 +291,48 @@ export function findRoutePath(originId: string | undefined, destinationId: strin
   return null;
 }
 
-export function searchParks(query: string) {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return carParks;
-  return carParks.filter(
-    (park) =>
-      park.name.toLowerCase().includes(normalized) ||
-      park.zone.toLowerCase().includes(normalized) ||
-      park.id.toLowerCase().includes(normalized),
-  );
+function normalizeStopSearch(value: string) {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2')
+    .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function oneTypingMistake(first: string, second: string) {
+  if (first.length < 4 || second.length < 4 || /\d/.test(first + second) || Math.abs(first.length - second.length) > 1) return false;
+  if (first === second) return true;
+  if (first.length === second.length) {
+    const differences = Array.from(first, (_, index) => index).filter((index) => first[index] !== second[index]);
+    return differences.length === 1 || (differences.length === 2 && differences[1] === differences[0] + 1 &&
+      first[differences[0]] === second[differences[1]] && first[differences[1]] === second[differences[0]]);
+  }
+  const [shorter, longer] = first.length < second.length ? [first, second] : [second, first];
+  for (let index = 0; index < longer.length; index += 1) {
+    if (longer.slice(0, index) + longer.slice(index + 1) === shorter) return true;
+  }
+  return false;
+}
+
+export function searchParks(query: string, options: readonly CarPark[] = carParks): CarPark[] {
+  if (!query.trim()) return [...options];
+  const normalized = normalizeStopSearch(query);
+  if (!normalized) return [];
+  const compact = normalized.replace(/ /g, '');
+  const words = normalized.split(' ');
+  return options.map((park, index) => {
+    const names = [park.name, park.zone, park.id, ...(parkAliases[park.id] || [])].map(normalizeStopSearch);
+    const score = Math.min(...names.map((name) => {
+      const joined = name.replace(/ /g, '');
+      if (name === normalized || joined === compact) return 0;
+      if (name.startsWith(normalized) || joined.startsWith(compact)) return 1;
+      if (name.includes(normalized) || joined.includes(compact)) return 2;
+      const nameWords = name.split(' ');
+      if (words.every((word) => nameWords.some((part) => part.startsWith(word)))) return 3;
+      if (words.every((word) => nameWords.some((part) => part.startsWith(word) || oneTypingMistake(word, part)))) return 4;
+      return Infinity;
+    }));
+    return { park, score, index };
+  }).filter(({ score }) => Number.isFinite(score))
+    .sort((a, b) => a.score - b.score || a.index - b.index).map(({ park }) => park);
 }
 
 export interface AIResponse {
@@ -310,9 +343,9 @@ export interface AIResponse {
 }
 
 const parkAliases: Record<string, string[]> = {
-  'wuse2': ['wuse 2', 'wuse two', 'banex'],
-  'wuse1': ['wuse 1', 'wuse one', 'wuse market'],
-  'wuse3': ['wuse 3', 'wuse three'],
+  'wuse2': ['wuse 2', 'wuse two', 'wuse ii', 'banex'],
+  'wuse1': ['wuse 1', 'wuse one', 'wuse i', 'wuse market'],
+  'wuse3': ['wuse 3', 'wuse three', 'wuse iii'],
   'berger': ['berger', 'berger junction', 'berger roundabout', 'berger hub'],
   'jabi': ['jabi'],
   'utako': ['utako'],
