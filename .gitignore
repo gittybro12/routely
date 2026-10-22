@@ -3,3 +3,8 @@ dist/
 .env
 .vscode/
 .DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+backend/*.sqlite3*
+backend/staticfiles/

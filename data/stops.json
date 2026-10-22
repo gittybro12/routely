@@ -1,0 +1,149 @@
+[
+  {
+    "id": "wuse2",
+    "name": "Wuse 2 Car Park",
+    "zone": "Wuse 2",
+    "latitude": 9.077,
+    "longitude": 7.481
+  },
+  {
+    "id": "wuse1",
+    "name": "Wuse 1 Car Park",
+    "zone": "Wuse 1 / Market",
+    "latitude": 9.062,
+    "longitude": 7.482
+  },
+  {
+    "id": "wuse3",
+    "name": "Wuse 3 Car Park",
+    "zone": "Wuse 3",
+    "latitude": 9.072,
+    "longitude": 7.472
+  },
+  {
+    "id": "berger",
+    "name": "Berger Transport Hub",
+    "zone": "Berger Junction",
+    "latitude": 9.059,
+    "longitude": 7.456
+  },
+  {
+    "id": "jabi",
+    "name": "Jabi Car Park",
+    "zone": "Jabi",
+    "latitude": 9.074,
+    "longitude": 7.422
+  },
+  {
+    "id": "utako",
+    "name": "Utako Car Park",
+    "zone": "Utako",
+    "latitude": 9.068,
+    "longitude": 7.447
+  },
+  {
+    "id": "kado",
+    "name": "Kado Car Park",
+    "zone": "Kado",
+    "latitude": 9.085,
+    "longitude": 7.44
+  },
+  {
+    "id": "life-camp",
+    "name": "Life Camp Car Park",
+    "zone": "Life Camp",
+    "latitude": 9.088,
+    "longitude": 7.408
+  },
+  {
+    "id": "gwarinpa",
+    "name": "Gwarinpa Car Park",
+    "zone": "Gwarinpa",
+    "latitude": 9.115,
+    "longitude": 7.412
+  },
+  {
+    "id": "kubwa",
+    "name": "Kubwa Car Park",
+    "zone": "Kubwa",
+    "latitude": 9.152,
+    "longitude": 7.342
+  },
+  {
+    "id": "cbd",
+    "name": "CBD Car Park",
+    "zone": "Abuja CBD",
+    "latitude": 9.055,
+    "longitude": 7.493
+  },
+  {
+    "id": "maitama",
+    "name": "Maitama Car Park",
+    "zone": "Maitama",
+    "latitude": 9.088,
+    "longitude": 7.492
+  },
+  {
+    "id": "garki",
+    "name": "Garki Car Park",
+    "zone": "Garki Area 2",
+    "latitude": 9.036,
+    "longitude": 7.486
+  },
+  {
+    "id": "area1",
+    "name": "Area 1 Transport Hub",
+    "zone": "Area 1",
+    "latitude": 9.034,
+    "longitude": 7.471
+  },
+  {
+    "id": "apo",
+    "name": "Apo Car Park",
+    "zone": "Apo / Gudu",
+    "latitude": 9.006,
+    "longitude": 7.488
+  },
+  {
+    "id": "lokogoma",
+    "name": "Lokogoma Car Park",
+    "zone": "Lokogoma",
+    "latitude": 8.985,
+    "longitude": 7.472
+  },
+  {
+    "id": "asokoro",
+    "name": "Asokoro Car Park",
+    "zone": "Asokoro / AYA",
+    "latitude": 9.048,
+    "longitude": 7.526
+  },
+  {
+    "id": "nyanya",
+    "name": "Nyanya Park",
+    "zone": "Nyanya",
+    "latitude": 9.028,
+    "longitude": 7.587
+  },
+  {
+    "id": "karu",
+    "name": "Karu Bus Park",
+    "zone": "Karu",
+    "latitude": 9.023,
+    "longitude": 7.568
+  },
+  {
+    "id": "lugbe",
+    "name": "Lugbe Transport Hub",
+    "zone": "Lugbe",
+    "latitude": 8.972,
+    "longitude": 7.378
+  },
+  {
+    "id": "airport",
+    "name": "Abuja Airport Car Park",
+    "zone": "Airport",
+    "latitude": 9.006,
+    "longitude": 7.263
+  }
+]

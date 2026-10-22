@@ -94,6 +94,8 @@ html { font-size: 100%; }
 .journey-secondary:hover:not(:disabled) { background: var(--j-soft); }
 .journey-find { width: 100%; margin-top: 20px; justify-content: space-between; padding-inline: 18px; min-height: 56px; }
 .journey-search-hint { margin-top: 12px !important; color: var(--j-muted); font-size: var(--j-text-sm); }
+.report-fields { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.report-delivery-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .journey-stop-option { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-block: 5px; overflow-wrap: anywhere; line-height: 1.5; }
 .journey-stop-option strong { font-size: 1rem; font-weight: 600; }
 .journey-stop-option small { font-size: .8125rem; opacity: .75; }

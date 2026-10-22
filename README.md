@@ -14,7 +14,7 @@ Routely is a public transport journey planner for Abuja. It is designed to help 
 - Find nearby starting stops when you allow location access.
 - Share a journey link or download its steps as text.
 - Save up to twenty journeys and reopen your five most recent successful searches on this device.
-- Explore the ten pilot journeys and record observations for review.
+- Explore the ten pilot journeys and submit observations to a shared staff inbox, with a copy on your device.
 - Ask the built-in journey helper for assistance. Local AI is optional.
 
 ## How it works
@@ -27,7 +27,7 @@ Routely is a public transport journey planner for Abuja. It is designed to help 
 
 The stop locations and connections are samples awaiting field checks. Dashed map lines connect stops; they do not show the streets a vehicle follows. The planner finds the fewest mapped rides. Live service, traffic, fares, operating hours, journey times, street-address search, and walking directions are not available.
 
-Reports are saved in your browser and must be downloaded to share with a maintainer. They are not automatically submitted or approved. Map tiles need internet; downloaded text steps can be read offline.
+Reports are sent to the Django backend for staff review. When the service is unavailable, a draft stays on your device when storage is available; use the retry button or **Coverage & data → Send saved report** later. A delivery receipt confirms submission. Acceptance by staff does not automatically change or verify a route. Map tiles need internet; downloaded text steps can be read offline.
 
 Saved journeys and recent searches also stay in this browser. They store the selected stops and reopen with current route information. They do not provide offline app or map access. If browser storage is unavailable, journeys are only kept for the current visit.
 
@@ -39,7 +39,7 @@ Saved journeys and recent searches also stay in this browser. They store the sel
 
 ## For developers
 
-Built with React, TypeScript, Vite, Material UI, and MapLibre.
+Built with React, TypeScript, Vite, Material UI, MapLibre, and Django.
 
 <details>
 <summary>Run on your computer</summary>
@@ -59,6 +59,36 @@ To run the tests and create a production build:
 npm test
 npm run build
 ```
+
+</details>
+
+<details>
+<summary>Django reports and staff review</summary>
+
+The backend is tested with Python 3.12. In a separate PowerShell terminal, start from the project root:
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe manage.py migrate
+.venv\Scripts\python.exe manage.py seed_stops
+.venv\Scripts\python.exe manage.py createsuperuser
+.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+```
+
+Keep the frontend running with `npm run dev` in another terminal. Open `http://127.0.0.1:8000/admin/` and sign in with the account you created. Filter reports by status or category, read the submitted evidence, choose a review status, and add review notes. Each decision records the reviewer, time, and audit history. Submitted evidence is read-only in the admin.
+
+The frontend and backend seed share `data/stops.json`. These remain sample stop locations. `seed_stops` is repeatable and keeps received reports. SQLite stores the local inbox in `backend/db.sqlite3`, which is excluded from Git along with virtual environments. Run backend checks with:
+
+```powershell
+.venv\Scripts\python.exe manage.py test
+.venv\Scripts\python.exe manage.py check
+```
+
+The Vite proxy sends `/api/v1`, `/admin`, and `/static` to Django, while `/api/chat` still uses local Ollama. Vite blocks direct access to backend files and excludes the Python environment from frontend file watching. The public API accepts reports with CSRF protection and returns delivery receipts; it does not expose the inbox or private observation details. Retrying the same report ID does not create a duplicate. Reports saved before this update are only sent when their owner chooses **Send saved report**.
+
+For hosting, run Django as a separate service with persistent database storage. Set `DJANGO_DEBUG=0`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, and `DJANGO_CSRF_TRUSTED_ORIGINS`; route the frontend's API requests to it and serve Django's collected static files. `ROUTELY_DB_PATH` can select the SQLite database location. A shared Django cache is needed to share the submission rate limiter across multiple workers. Local development uses a temporary secret unless you set `DJANGO_SECRET_KEY`.
 
 </details>
 

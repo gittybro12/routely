@@ -1,10 +1,27 @@
-import { ArrowRight, ClipboardCheck, Download, MapPin } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowRight, ClipboardCheck, Download, MapPin, Send } from 'lucide-react';
 import { carParks, findRoutePath, getParkById } from './data';
 import { downloadText, journeyStatus, PILOT_JOURNEYS, pilotSurveyTemplate, shortStopName } from './journey';
 import { readReports } from './reports';
+import { sendReport } from './reportApi';
+import type { CorrectionReport } from './reports';
 
 export default function CoveragePage({ onPlan, onReport }: { onPlan: (from: string, to: string) => void; onReport: () => void }) {
-  const reports = readReports();
+  const [sendingId, setSendingId] = useState('');
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  const [receipts, setReceipts] = useState<Record<string, CorrectionReport>>({});
+  const reports = readReports().map((report) => receipts[report.id] || report);
+  async function deliver(report: CorrectionReport) {
+    if (sendingId) return;
+    setSendingId(report.id); setSendErrors((previous) => ({ ...previous, [report.id]: '' }));
+    try {
+      const result = await sendReport(report);
+      setReceipts((previous) => ({ ...previous, [report.id]: result.report }));
+      if (!result.keptOnDevice) setSendErrors((previous) => ({ ...previous, [report.id]: 'Submitted, but this browser could not keep the receipt. Download a copy of your reports.' }));
+    } catch (failure) {
+      setSendErrors((previous) => ({ ...previous, [report.id]: failure instanceof Error ? failure.message : 'Your report could not be submitted. Please try again.' }));
+    } finally { setSendingId(''); }
+  }
   const checked = PILOT_JOURNEYS.filter(({ from, to }) => journeyStatus(findRoutePath(from, to)).isVerified).length;
   return <main className="coverage-page" id="main-content">
     <div className="coverage-heading"><span className="journey-eyebrow">BUILDING A USEFUL ABUJA GUIDE</span><h1>Small coverage. Clear information.</h1><p>Our first milestone is ten journeys with boarding points and connections checked on the ground. The current network is sample data.</p></div>
@@ -17,6 +34,6 @@ export default function CoveragePage({ onPlan, onReport }: { onPlan: (from: stri
       })}</div>
     </section>
     <div className="coverage-bottom"><section className="coverage-info-card"><MapPin size={24} /><h2>What the map can tell you</h2><p>Stop pins are sample locations. Dashed lines show connections between stops, not the streets a vehicle follows. Recorded paths appear as solid lines when available.</p><p>Fares, operating hours, journey times, and live service are not available.</p></section><section className="coverage-info-card"><ClipboardCheck size={24} /><h2>Help check a journey</h2><p>Record the direction, exact boarding and alighting landmarks, transport type, and the date and source of your observation.</p><button className="journey-primary" onClick={onReport}>Record an observation</button></section></div>
-    <section className="coverage-reports"><div className="coverage-section-heading"><div><h2>Reports on this device</h2><p>Reports are stored in this browser. Download them to share with the maintainer.</p></div>{reports.length > 0 && <button className="journey-secondary" onClick={() => downloadText('routely-reports.json', JSON.stringify(reports, null, 2), 'application/json')}><Download size={16} /> Download all reports</button>}</div>{reports.length ? <ul>{reports.map((report) => <li key={report.id}><strong>{shortStopName(getParkById(report.from))} → {shortStopName(getParkById(report.to))}</strong><span>Pending review · {new Date(report.createdAt).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos' })}</span><p>{report.description}</p></li>)}</ul> : <p className="coverage-empty">No reports saved yet. Observations help turn this prototype into a dependable guide.</p>}</section>
+    <section className="coverage-reports"><div className="coverage-section-heading"><div><h2>Your reports on this device</h2><p>Submitted reports go to the staff inbox. Reports marked “not submitted” can be sent below.</p></div>{reports.length > 0 && <button className="journey-secondary" onClick={() => downloadText('routely-reports.json', JSON.stringify(reports, null, 2), 'application/json')}><Download size={16} /> Download all reports</button>}</div>{reports.length ? <ul>{reports.map((report) => <li key={report.id}><strong>{shortStopName(getParkById(report.from))} → {shortStopName(getParkById(report.to))}</strong><span>{report.delivery?.status === 'submitted' ? 'Submitted for staff review' : 'On this device · not submitted'} · {new Date(report.createdAt).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos' })}</span><p>{report.description}</p>{!report.delivery && <div className="report-delivery-actions"><button className="journey-secondary" disabled={Boolean(sendingId)} onClick={() => void deliver(report)}><Send size={16} />{sendingId === report.id ? 'Sending report…' : 'Send saved report'}</button></div>}{sendErrors[report.id] && <p className="journey-error" role="alert">{sendErrors[report.id]}</p>}</li>)}</ul> : <p className="coverage-empty">No reports saved yet. Observations help turn this prototype into a dependable guide.</p>}</section>
   </main>;
 }
